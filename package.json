@@ -1,0 +1,28 @@
+{
+  "name": "@local/dsh-live-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Switch the DeepSeek Harness outbound proxy policy at runtime, with reachability probing and automatic direct fallback.",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "lib/*.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-http-proxy": ">=0.2.1-rc.3 <0.3.0",
+    "@deepseek-ai/schemastery": "~3.18.5"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
