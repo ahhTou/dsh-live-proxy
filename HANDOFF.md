@@ -1,6 +1,6 @@
 # dsh-live-proxy 交接文档
 
-> **进度更新（2026-10-26 晚）：** 插件已完成、已装进 desktop profile 并验证可加载；当前卡在「设置页看不到配置字段」。接手请先读 [HANDOFF-NEXT.md](HANDOFF-NEXT.md)，本文作为立项背景与 seam 研究保留。
+> **进度更新（2026-10-27 凌晨）：** 插件已完成、已装进 desktop profile；「设置页看不到字段」的根因已定位——这一版 DSH 不会给第三方 bundle 自动生成表单，必须由插件自己的浏览器半侧占用 `settings.general.item` / `plugins.row.config`。已补 `lib/client.js`，隔离环境验证通过；桌面端重启一次后可在 **设置 → 通用设置 → 代理**（以及 Plugins 行配置）修改。接手请先读 [HANDOFF-NEXT.md](HANDOFF-NEXT.md)，本文作为立项背景与 seam 研究保留。
 
 > 由上一会话（工作区 `default-workspace`）在 2026-10-25 生成。新会话读完这份即可接上，无需回看原对话。
 

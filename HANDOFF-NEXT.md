@@ -1,258 +1,123 @@
-# dsh-live-proxy 交接文档（2026-10-26 晚）
+# dsh-live-proxy 交接文档（2026-10-27 凌晨）
 
-> 给下一个会话：读完这一份就能接手，不需要回看之前的对话。
-> 原始立项背景、seam 逆向结论、踩坑记录仍在仓库的 [HANDOFF.md](HANDOFF.md) 里（本文不重复，但下面的「代码地图」覆盖了现状）。
+> 给下一个会话：这份文档覆盖当前状态。立项背景、seam 逆向、旧排查记录在 [HANDOFF.md](HANDOFF.md)，这里只写结论与现状。
 
 ## 0. 一句话状态
 
-插件**写完、测完、已装进 desktop profile，并已证明能在真实 loader 里加载和生效**；唯一没解决的是——**设置界面上看不到它的配置字段**。下一步只需要定位：是「看错页面」，还是「这个版本不会给非官方插件自动生成表单」。
+**根因已定位并修复**：这一版 DSH **不会**给第三方 bundle 的行自动生成配置表单，`plugins.row.config` 槽位必须由插件自己的**浏览器半侧**占用。已新增 `lib/client.js` 并完成隔离验证（入口、6 个字段、保存写回 patch、热生效、恢复默认、SOCKS 校验都通过）。**桌面客户端还差一次重启**：浏览器半侧只在启动时扫描，`dsh-client-modules` 对「不是客户端包」的否定结果会缓存到进程重启。
 
-## 1. 已完成，不要重做
+重启后入口：**设置 → 通用设置 → 代理 → 配置**（首选）；也可以走 **Plugins → 已安装插件 → 实时代理 → 配置**。两个入口共用同一份表单。
 
-### 1.1 仓库
+## 1. 根因（已实时确认）
 
-| 项 | 值 |
-|---|---|
-| 本地路径 | `/Users/ahhtou/Dev/dsh-live-proxy` |
-| 远端 | `git@github.com:ahhTou/dsh-live-proxy.git`（`main`） |
-| 当前提交 | `dca14a7 feat: scaffold the dsh-live-proxy Host plugin` |
-| 包名 | `@local/dsh-live-proxy`（发布时改 `dsh-live-proxy`） |
-| 单测 | `node --test test/*.test.js` → 42 通过、1 跳过 |
+- `dsh-client-ui-plugin-manager` 的 `configLedgerSource` 只用 `plugins.row.config` 的**注册键**决定一行有没有配置页：
 
-跳过的那个是 `test/plugin.test.js`：它 `import('../index.js')` 需要 `@deepseek-ai/schemastery`，只有 DSH 安装里有，本地 checkout 解析不到，属预期。
+  ```js
+  rows: keysOf("plugins.row.config")   // 没有占用者 → 行标题只是纯文本，没有「配置」按钮
+  ```
 
-### 1.2 代码地图
+  `plugins.row.config` 是 keyed slot，key 为 `<bundle 包名>#<rowId>`；页面把 `form`（`state` + `mutate`）传给占用者，但**它自己不渲染任何字段**。
+- 实时查询 `Slots.listSubTree({ root: 'plugins.row.config' })` 得到 `occupants: []`——不是「看错页面」，是确实没有渲染器。
+- `SettingsForms.describe()` 会为我们的行生成表单数据（`ns: 'dsh-live-proxy'`、6 个 volatile 字段、当前值/默认值/用户层），但那只是数据；官方页面（`ui-settings-shell` 等）都是各自占 `plugins.item` 并自绘表单。
+- `Settings → 内置插件` 仍然是只读清单，第三方 bundle 的配置入口只在 Plugins 页。
+
+## 2. 修复内容
 
 | 文件 | 职责 |
 |---|---|
-| `index.js` | Cordis 插件面：`name`、6 个 `.volatile()` 字段的 `Config`、`apply()`（mount 时 sync + 监听 `loader/volatile-update` + `ctx.effect` 清理） |
-| `lib/config.js` | 配置校验/默认值；`readConfig()` 用 `Symbol.for('cosmokit.volatile.write')` 解引用；`socks5://` 给出可执行报错；裸 `host:port` 补 `http://` |
-| `lib/policy.js` | `effectivePolicy()`（direct / no-url / unreachable 三种直连原因）、`environmentFor()` 生成 installer 需要的 env Map、`policyKey()`、`describePolicy()` |
-| `lib/controller.js` | **串行化**的 install/dispose 链（官方 installer 的 disposer 是异步的，不能并发）；相同策略跳过；懒加载 seam（测试可注入） |
-| `lib/probe.js` | 对代理 host:port 做 TCP connect（不发外部请求），只在可达性翻转时回调；定时器 `unref()` |
-| `lib/session.js` | 配置快照 + 探测 + 控制器：mount / 设置改动 / 探测翻转都走同一条 reconcile |
-| `cordis.patch.yml` | bundle 默认配置：`mode: manual`、`proxyUrl: http://127.0.0.1:7897`、原有直连例外、`probeIntervalMs: 15000` |
-| `README.md` / `AGENTS.md` | 使用说明 / 提交必须带 `Agent:` `Model:` trailer |
+| `lib/client.js` | 浏览器半侧：注册 `settings.general.item`（设置 → 通用设置 → 代理，id `live-proxy`、order 25、展开式表单）与 `plugins.row.config`（row 键 `@local/dsh-live-proxy#dsh-live-proxy`）；中英文案；6 字段表单；保存 / 放弃修改 / 恢复默认；SOCKS、URL、整数范围校验；只用 React，不 require 内部 primitives |
+| `package.json` | 增加 `exports["./client"]`、`exports["./locale/*.json"]`、`exports["./icon"]`；`dsh.client`（`platform: web`，inject locale + plugin-manager + settings）；`icon`；`files` |
+| `locale/en.json` / `locale/zh.json` | `meta.title` / `meta.description`，Plugins 卡片与行显示「实时代理」 |
+| `icon.svg` | 原创图标（蓝色圆角底 + 穿过节点的双向箭头 + 绿色在线点） |
+| `test/client.test.js` | 校验 module id、注册 key、inject、双语字典、locale 元数据、icon 导出 |
+| `README.md` | 修正入口路径，新增「2.1 界面入口」与浏览器半侧说明 |
 
-### 1.3 安装状态（已生效）
+Host 半侧（`index.js`、`lib/*.js`）**没有改动**；6 个字段本来就是 volatile，`loader/volatile-update` 热更新链路原本就成立，缺的只是 UI。
 
-`~/.dsh/profiles/desktop/package.json`：
+> 发布时若把包名从 `@local/dsh-live-proxy` 改成 `dsh-live-proxy`，必须同步改三处：`lib/client.js` 的 module `id` 和 `ROW_KEY`，以及 `test/client.test.js` 的期望值（测试会检查 module id 等于 `package.json.name`、key 等于 `<name>#dsh-live-proxy`）。
 
-```json
-"dsh": { "profile": { "bundles": [
-  "@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app",
-  "@local/dsh-mcp-bridge", "@local/dsh-live-proxy" ] } },
-"dependencies": {
-  "@local/dsh-live-proxy": "link:/Users/ahhtou/Dev/dsh-live-proxy",
-  ...
-}
-```
+## 3. 已验证（隔离实例）
 
-安装命令（会同时写依赖和 bundles，`dsh plugin` 自动处理）：
+环境：`DSH_HOME=/tmp/dsh-ui-verify`，`dsh plugin --profile web add link:/Users/ahhtou/Dev/dsh-live-proxy`，`dsh --profile web --port 0 --no-open`，浏览器用 bsk 打开。
 
-```sh
-"/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" \
-  plugin --profile desktop add "link:/Users/ahhtou/Dev/dsh-live-proxy"
-```
+| 验证 | 结果 |
+|---|---|
+| 安装后的卡片 | Plugins → 已安装插件显示「实时代理」、图标、中文描述 |
+| 设置入口 | **更多/账号菜单 → 设置 → 通用设置** 中出现「代理」行（order 25，青色双向箭头图标，「配置」按钮展开表单）。**不是**独立 section：`settings.section` 的未知 id 会被 shell 强制画成齿轮，和「通用设置」撞图标 |
+| 行入口 | 卡片内 `dsh-live-proxy` 行出现「配置 实时代理」按钮（修复前是纯文本） |
+| 配置页 | 6 个字段全部渲染，默认值来自 `cordis.patch.yml`（manual / 127.0.0.1:7897 / 例外列表 / 回落开 / 15000 / 2000） |
+| 保存 | 在通用设置的代理行改 `probeIntervalMs` → profile patch 出现完整 config（DSH 的 config editor 会持久化整份配置，不是只写改动字段，这是正常行为）；两个入口值同步 |
+| 热生效 | 把 `proxyUrl` 指向 127.0.0.1:8799 的临时 listener、`probeIntervalMs: 500` → 保存后 3 秒内捕获 7 次连接，间隔严格 0.5s，**未重启 host** |
+| 校验 | `socks5://...` → 页面提示「DSH 不接受 SOCKS」，patch 不变 |
+| 恢复默认 | 写 `unset` 操作 → 用户 patch 中的 `dsh-live-proxy` 条目被删除，表单回到 bundle 默认值 |
+| 单测 | `node --test test/*.test.js` → 45 pass / 1 skip（`test/plugin.test.js` 需要 app 内的 schemastery，属预期） |
 
-原清单/锁文件备份在 `/tmp/dsh-profile-backup/`。pnpm 报的两个 peer 解析不到是**预期**的，不要「修」（见 §6）。
+截图（已入库）：`docs/settings-general-proxy.png`、`docs/settings-proxy-form.png`、`docs/plugins-entry.png`。
 
-### 1.4 已验证的证据
+## 4. 桌面客户端：只差一次重启
 
-| 验证 | 方法 | 结果 |
-|---|---|---|
-| 单元测试 | `node --test test/*.test.js` | 42 pass / 1 skip |
-| 真 seam（脱离 app） | 用 app 自带 Node + asar 里的包跑插件 | mount → `proxyRouteFor(google)` = proxied；改 volatile 引用 → direct；改回 → proxied；卸载 → direct；child env 带合并后的 loopback 例外 |
-| 探测回落 | 指向死端口 + 真 TCP 探测 | 200ms 内切直连并 warn；端口恢复后自动切回 |
-| 真实 loader 挂载 | 隔离 `DSH_HOME=/tmp/dsh-verify` 装同一包、`dsh --profile web` 启动、overlay 把 `proxyUrl` 指到 `127.0.0.1:8799`、`probeIntervalMs: 500`，另起 python 监听 8799 | 6 秒窗口内 13 次连接、间隔精确 0.5s → 导入 + schema + apply + 探测循环全部正常 |
-| 桌面重启后 | app 20:30:51 重启，`web_fetch https://www.google.com` | HTTP 200（注意：这条**不能**证明是本插件在生效，`.env` 里的 `HTTPS_PROXY` 同样会走 7897） |
+为什么必须重启：`dsh-client-modules` 在启动时扫描每个 Loader 行的 `package.json`；当时本包还没有 `dsh.client`，否定结果按 `(baseUrl, 包名)` 缓存在 `pkgMeta` 里，直到进程重启（源码：`dsh-client-modules/lib/index.js` 的 `resolveMeta` / `pkgMeta`）。改代码、开关插件、刷新页面都不会清掉这个缓存。
 
-## 2. 唯一未决问题：设置页看不到字段
+重启后自检：
 
-用户原话：**「有 dsh-live-proxy ，但是看不到字段」**——没有说明是在哪一页看的。
+1. **更多/账号菜单 → 设置 → 通用设置 → 代理 → 配置**，确认 6 个字段与当前值；改一个值保存，确认「已保存，立即生效」；
+2. **Plugins → 已安装插件 → 实时代理**，确认卡片标题/描述/图标正常，行上也有「配置」入口；
+3. 用 `web_fetch https://www.google.com` 或 `nc` 验证策略真的切换（`web_fetch` 走 `proxyRouteFor`，不是全局 dispatcher）。
 
-### 2.1 已排除
+若重启后仍没有「代理」行 /「配置」按钮：
 
-- **schema 本身没问题**：冒烟测试里读到了 `plugin.Config.dict`，6 个字段的 `meta.volatile` 都是 `true`；
-- **volatile 判定没问题**：`volatileForm()` 对「根不可变、子字段可变」的 object schema 会返回这 6 个字段；
-- **loader 导入/激活没问题**：§1.4 的隔离启动已证明。
+- 查 `~/.dsh/profiles/desktop/package.json` 的依赖是否仍为 `link:/Users/ahhtou/Dev/dsh-live-proxy`；
+- 用 `cordis_inspect_query`（client `Slots.listSubTree`，root `settings.general.item` 与 `plugins.row.config`）看 occupants 是否出现 `live-proxy` 与 `@local/dsh-live-proxy#dsh-live-proxy`；
+- 看桌面端开发者工具 console 是否有 `client-modules` / `module-loader` 报错（常见：`dsh.client` 声明缺 `exports["./client"]`、module id 与包名不一致、`configForms` 服务缺失）；
+- 确认 `package.json` 的 `exports["./client"]` 指向的文件存在，且 `lib/client.js` 的 module id 与包名一致。
 
-### 2.2 相关机制（源码位置都在 app.asar 内）
-
-- 表单来源：`dsh-settings/lib/index.js` → `SettingsForms.describe()`（约 416 行）。进入表单的硬条件：
-
-  ```js
-  const schema = this.schema(entry);                 // entry.fiber?.runtime?.Config 且带 toJSON
-  if (schema === void 0 || entry.fiber === void 0
-      || entry.fiber.runtime === null || entry.fiber.state !== 2) return [];  // state 2 = 已激活
-  const form = volatileForm(schema);                 // 没有 volatile 字段就没有表单
-  ```
-
-  描述符里的 `applies: "live"` 是 settings 服务自己加的，插件不需要声明。
-
-- 渲染位置：`dsh-client-ui-plugin-manager/lib/client.js`
-  - 约 1032 行：`configurations: this.ctx.configForms.describe()`
-  - 约 3833 行：`formFor(id)` 用 `configurations.some(view => view.ns === id)` 匹配
-  - 约 4143 行：行详情页 `RowDetail` 传的是 `formFor(openRow.rowId)`
-  - **即：表单挂在「bundle 详情 → 某一行 → 行详情页」，按 `ns === rowId` 匹配**（`ns` 就是 profile entry id，即 `dsh-live-proxy`）。
-
-- `Settings → Built-in plugins` 是**只读清单**（`dsh-client-ui-settings-plugins` README 明写：「Settings keeps the read-only inventory」），第三方 bundle 的配置在**侧边栏 Plugins 页**。
-
-### 2.3 两个候选原因（下一步就是区分它们）
-
-| # | 假设 | 如何确认 |
-|---|---|---|
-| A | **看错页面**：用户看的是 Settings → 内置插件（只读），或者只停在 bundle 详情页、没点开里面的行 | 让用户按 §3 的路径再走一遍 |
-| B | **插件在 desktop profile 里没激活**（`fiber.state !== 2`），所以 `describe()` 直接跳过它 | 见 §4 的三种判定手段 |
-| C | 表单匹配键不一致：`row.rowId` 不等于 entry id `dsh-live-proxy` | 行详情页会把 `rowId` 以 `<code>` 显示出来，看它显示什么 |
-
-## 3. 让用户先按这个路径看
-
-1. 侧边栏 **Plugins**（不是 Settings）；
-2. **Installed plugins** → 点开 `@local/dsh-live-proxy` 卡片；
-3. 卡片详情里应该列出一行 **`dsh-live-proxy`**（行标题下面会以 `<code>` 显示 `rowId` 和 `moduleName`）；
-4. **点这一行**进入行详情页 → 那里才应该有 6 个字段。
-
-如果第 3 步那一行不存在，或第 4 步页面是空的，记录：行标题/`rowId`/`moduleName` 显示成什么、卡片或行上有没有 error/warning 标记。
-
-## 4. 如果确认有行但没字段：判定是否激活
-
-按代价从低到高：
-
-### 4.1 对照实验（最推荐，5 分钟）
-
-`@local/dsh-mcp-bridge` 是同一作者、同样 `link:`、同一 profile、**已知可用**的 Host 插件，只是它没有 `Config`。临时给它加一个只有 1 个 volatile 字段的 `Config`：
-
-```js
-// ~/Dev/dsh-mcp-bridge/index.js 顶部
-import z from '@deepseek-ai/schemastery';
-export const Config = z.object({ debugNote: z.string().default('').volatile() });
-```
-
-同时在它的 `package.json` 加 peer `@deepseek-ai/schemastery`，重启 app。
-
-- 如果 mcp-bridge 的字段**出现了** → 机制对 linked 插件有效，问题在我们这边（回到 §2.2 逐条对）；
-- 如果 mcp-bridge **也没字段** → 这个 DSH 版本不会给非官方插件自动生成表单，走 §4.4。
-- 测完记得把 mcp-bridge 的改动撤掉（那是另一个在用的仓库）。
-
-### 4.2 让插件自己报活
-
-给 `apply()` 加一行「挂载即写文件」（或直接 `ctx.logger.error`，error 级别更可能被某个界面显示）：
-
-```js
-import { writeFileSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-mkdirSync(`${homedir()}/.dsh`, { recursive: true });
-writeFileSync(`${homedir()}/.dsh/live-proxy-status.json`,
-  JSON.stringify({ mountedAt: new Date().toISOString(), config: readConfig(config) }, null, 2));
-```
-
-重启一次后读这个文件。**这是目前唯一能稳定证明 desktop 进程里插件已 mount 的手段**（日志不可读，见 §6）。确认后这段诊断代码可以删，或者保留成一个 status 文件（类似 mcp-bridge 的 `mcp-bridge-endpoint.json`，排障有用）。
-
-### 4.3 隔离环境复现桌面配置
-
-把 desktop profile 复制到临时 home 里跑（注意 desktop profile 不能直接被 CLI 启动，但复制出来改名可以）：
-
-```sh
-export DSH_HOME=/tmp/dsh-verify2
-DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-mkdir -p "$DSH_HOME/profiles"
-cp -a ~/.dsh/profiles/desktop "$DSH_HOME/profiles/probe"
-"$DSH" --profile probe --dump-config | grep -A10 dsh-live-proxy   # 看组合是否有这一行
-```
-
-`--dump-config` 能告诉你 bundle patch 有没有真的展开成 entry；入口存在但不激活才会是 §2.3-B。
-
-### 4.4 如果结论是「这个版本不自动给第三方插件生成表单」
-
-那就按原 HANDOFF 第 4 步走**自带客户端设置页**：在 `package.json` 声明 `dsh.client`（参考 `dsh-client-ui-plugin-manager`、社区插件 `dsh-whale-widget` 的包结构），Host 侧在 `apply` 里 `ctx.inject(['settings'], (child) => child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)))` 关掉自动表单，客户端注册一个小的配置页。这一步工作量明显更大，做之前先确认 §4.1 的结论。
-
-## 5. 环境备忘（新会话直接用）
-
-### 5.1 事实
+## 5. 环境备忘
 
 | 项 | 值 |
 |---|---|
-| DSH | `0.2.1-rc.3`（asar 在 `/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/`） |
+| DSH | `0.2.1-rc.3`（asar：`/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/`） |
 | CLI | `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh` |
-| Node | 系统 `v22.23.2`；app 内 `24.21.0` |
-| 桌面 profile | `~/.dsh/profiles/desktop`（**只能由 Electron app 启动**） |
-| 代理 | `127.0.0.1:7897`（YouTuCore） |
-| 备份 | `/tmp/dsh-profile-backup/{package.json,pnpm-lock.yaml}` |
-
-### 5.2 命令坑
-
-- `dsh --profile desktop --dump-config` → `error: profile "desktop" is managed exclusively by the Electron application`。**没有**绕过办法，只能复制 profile 到临时 home。
-- `dsh web --help` 会**真的启动** web app（`--help` 被当成 app 参数）。要停就 kill。
-- 启动 web 实例时加 `--no-open`，否则会在浏览器开一个标签页。
-- `ps` 被沙箱挡住（`Operation not permitted`）；`lsof`、`pgrep`、`curl` 正常。
-- 应用 stdout/stderr 是 unix socket，没有日志文件；`log show` 也抓不到插件日志。**所以 §4.2 的状态文件是最可靠的探针。**
-
-### 5.3 沙箱
-
-- 文件策略 `workspace-write`：写 `~/.dsh` 需要 `sandbox_permissions: "danger-full-access"` + 说明理由（会弹审批）。
-- 写 `/tmp` 正常。
-
-### 5.4 隔离验证配方（已跑通）
-
-```sh
-export DSH_HOME=/tmp/dsh-verify
-DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
-mkdir -p "$DSH_HOME"
-"$DSH" plugin --profile web add "link:/Users/ahhtou/Dev/dsh-live-proxy"
-
-cat > /tmp/live-proxy-verify.yml <<'EOF'
-- id: dsh-live-proxy
-  config:
-    mode: manual
-    proxyUrl: http://127.0.0.1:8799
-    fallbackToDirect: true
-    probeIntervalMs: 500
-    probeTimeoutMs: 300
-EOF
-
-"$DSH" --profile web --patch /tmp/live-proxy-verify.yml --no-open   # 后台起
-# 另一个终端：python3 监听 8799 数连接，间隔 ≈ probeIntervalMs 就说明插件挂载并在探测
-```
+| 桌面 profile | `~/.dsh/profiles/desktop`（只能由 Electron app 启动） |
+| 隔离验证 profile | `/tmp/dsh-ui-verify/profiles/web`（可随时删） |
+| 本机代理 | `127.0.0.1:7897`（YouTuCore） |
+| 浏览器会话 | bsk；隔离实例端口每次随机（从 `web.log` 读） |
 
 ## 6. 已知坑（别踩第二遍）
 
-1. **不要为了测试把 `mode` 改成 `direct`**：模型请求也走同一条策略，可能直接断掉当前会话；而且设置会持久化进 profile patch，重启后还是 direct，用户会卡住。要验证热切换，用 `noProxy` 加一个只影响测试域名的条目（如 `www.google.com`）。
-2. **peer 警告不是错误**：loader 按 peer 名把 `@deepseek-ai/*` 裸导入路由到运行中安装副本（`dsh-app-boot` 的 `routeLinked` / installation scope）。删掉 peer 反而会让插件导入失败。
-3. **官方 installer 的 disposer 是异步的**：必须先 `await` 旧 disposer 再装新的，否则 dispatcher 泄漏；`lib/controller.js` 已经串行化，改代码时别绕过它。
-4. **只改 `setGlobalDispatcher()` 修不了 `web_fetch`**：`web_fetch` 每次请求读 `proxyRouteFor()`，必须走 `installProxyFromEnvironment`。
+1. **不要为了测试把 `mode` 改成 `direct`**：模型请求也走同一条策略，可能直接断掉当前会话；要验证热切换，用 `noProxy` 加一个只影响测试域名的条目。
+2. **peer 警告不是错误**：loader 按 peer 名把 `@deepseek-ai/*` 裸导入路由到运行中安装副本；删掉 peer 反而会让插件导入失败。
+3. **官方 installer 的 disposer 是异步的**：`lib/controller.js` 已串行化，别绕过。
+4. **只改 `setGlobalDispatcher()` 修不了 `web_fetch`**：必须走 `installProxyFromEnvironment` / `proxyRouteFor`。
 5. **worker 和遥测不走代理**（官方设计），别去「修」。
-6. `.env` 里的代理变量在插件生效期间会被插件策略覆盖；插件停用/卸载后会回到 `.env` 的策略。
+6. **桌面端重启会结束当前会话**；会话持久化，重启后可恢复。
+7. **客户端 bundle 不能用 `import`/JSX**：它是 `window.__ModuleLoader__.load({ id, factory })` 工厂，只能用 `require('react')` 等静态模块表里的名字；不要 require `@deepseek-ai/dsh-client-ui-primitives`（内部包，版本会变）。
+8. **key 必须精确匹配**：`<bundle 包名>#<rowId>`；包名是 inventory 里的 `pkg.name`（当前 `@local/dsh-live-proxy`），rowId 是 patch 里的 `id`（`dsh-live-proxy`）。
+9. **Settings 行依赖 `configForms` 服务**：`lib/client.js` 的 `inject` 里必须有 `configForms`；`dsh.client.inject` 里必须有 `@deepseek-ai/dsh-client-ui-settings`，否则 client 半侧在启动时不会按依赖顺序拿到 settings 的客户端包（服务本身由 `dsh-client-ui-settings` 提供）。
+10. **不要用 `settings.section` 给第三方插件做独立页**：`dsh-client-ui-settings-general` 的 `navIcon(id)` 只为官方 id 配图标（account/models/plugins/agent-presets/archived-sessions），**未知 id 一律回退齿轮**，会和「通用设置」撞图标。用 `settings.general.item` 行（自己画行内图标）或 `settings.plugins.tab` 才能有独立图标。我们用的是 `settings.general.item`，id `live-proxy`、order 25。
 
-## 7. 文件/源码速查
+## 7. 关键源码位置
 
-插件仓库外、需要重新读 app.asar 时的提取方法（原 HANDOFF §7 有完整版）：
+- `dsh-client-ui-plugin-manager/lib/client.js`
+  - ~13–70：`configLedgerSource` / `rowConfigKey`（行配置只认 slot 注册）
+  - ~2349–2468：`RowsSection`（有注册才渲染 configure 按钮）
+  - ~2760–2830：`RowDetail`（把 `view: 'page'` + `form` 传给 `plugins.row.config`）
+  - ~3832–3838：`formFor`（`configForms` 按 `ns === rowId` 匹配）
+- `dsh-client-ui-settings/lib/client.js`
+  - ~1080–1244：`ConfigFormController`（`getSnapshot` / `subscribe` / `mutate` / `set` / `unset`）
+  - ~1252–1334：`ConfigForms` 服务（`get(entryId)` / `whileServed(namespaces, register)` / `describe()`）
+- `dsh-client-ui-settings-general/lib/client.js`
+  - ~244–270：`navIcon(id)`（未知 section id 回退齿轮，这是不用独立 section 的原因）
+  - ~1079–1100：官方 `settings.general.item` 注册范式（id / order / locale / inject / component）
+  - ~1299–1309：`settings.section` 的 General 注册与 `settings.general.item` 子槽
+- `dsh-client-ui-settings-plugins/lib/client.js` ~201：官方 `settings.section` 注册范式（id / order / label / locale / inject / component）
+- `dsh-settings/lib/index.js` ~413–464：`describe()`（fiber 必须 state 2、有 volatile 字段）
+- `dsh-settings/lib/types/schema.js`：`volatileForm()` / `projectForm()`
+- `dsh-cordis-client-runner/lib/client.js` ~4759：`plugins.row.config` 目录与 owner props；`settings.general.item` / `settings.section` 目录在附近
+- `dsh-client-modules/lib/index.js` ~721：`resolveMeta` 负缓存；~625：`rebuilt()`（只刷新已入表的包）
 
-```sh
-E="/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness"
-ELECTRON_RUN_AS_NODE=1 "$E" -e '
-const fs=require("fs"), path=require("path");
-const SRC="/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai";
-function copy(a,b){const s=fs.statSync(a);if(s.isDirectory()){fs.mkdirSync(b,{recursive:true});for(const n of fs.readdirSync(a))if(n!=="node_modules")copy(path.join(a,n),path.join(b,n))}else if(/\.(js|ts|json|md|yml)$/.test(a)){fs.mkdirSync(path.dirname(b),{recursive:true});fs.writeFileSync(b,fs.readFileSync(a))}}
-for(const p of ["dsh-settings","dsh-client-ui-plugin-manager","cordis-plugin-loader","cordis","cosmokit","dsh-app-boot","dsh-config-editor"])copy(path.join(SRC,p),path.join("/tmp/dsh-src",p));
-console.log("ok")'
-```
+## 8. 建议的下一步
 
-关键文件：
-
-- `dsh-settings/lib/index.js`：`SettingsForms.describe()`（~416）、`schema()`（~538）
-- `dsh-settings/lib/types/schema.js`：`volatileForm()` / `plainSchema()`
-- `dsh-client-ui-plugin-manager/lib/client.js`：~1032 `configurations`、~3833 `formFor`、~4140 行详情、~2760 `RowDetail`
-- `cordis-plugin-loader/lib/index.js`：~382–422 volatile-only 提交 + 发 `loader/volatile-update`
-- `dsh-app-boot/lib/index.js`：~717 installation scope、~1690 `routeLinked`（peer 路由）
-
-## 8. 建议的下一步（按顺序）
-
-1. 让用户按 §3 的路径走一遍，记录行里的 `rowId` 和有没有报错标记。
-2. 若页面路径确实没有字段 → 做 §4.1 的 mcp-bridge 对照实验（最快区分「机制问题」还是「我们代码问题」）。
-3. 需要证明 desktop 里插件是否激活 → 上 §4.2 的状态文件，重启一次读结果。
-4. 结论出来后：
-   - 若是位置问题 → 到此收尾，补 README 的界面路径说明；
-   - 若是 rowId/ns 不匹配 → 调整 entry id 或包名后重装；
-   - 若是非官方插件不生成表单 → 按 §4.4 做客户端设置页（新的一个 commit）。
-5. 收尾时更新本文档和 `README.md`，commit 仍要带 `Agent:` / `Model:` trailer。
+1. 重启桌面端，按 §4 自检并反馈「配置」入口是否出现。
+2. 若出现：到此收尾；可把 `README` 的截图补进仓库（可选），并考虑给仓库加 `dsh-plugin` topic。
+3. 若仍不出现：按 §4 的三条排查，重点看 occupants 与 console 报错。
+4. 长期路线图（未做）：`mode: system`（`scutil --proxy`）、会话头部一键开关、按用途分流、改名发布 `dsh-live-proxy`（记得同步 §2 的三处 id）。

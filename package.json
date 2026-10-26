@@ -4,13 +4,20 @@
   "private": true,
   "type": "module",
   "description": "Switch the DeepSeek Harness outbound proxy policy at runtime, with reachability probing and automatic direct fallback.",
+  "icon": "./icon.svg",
   "exports": {
-    ".": "./index.js"
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
   },
   "files": [
     "index.js",
     "lib/*.js",
     "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "docs/*.png",
     "README.md"
   ],
   "scripts": {
@@ -23,6 +30,14 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
     }
   }
 }

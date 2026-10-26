@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Live proxy",
+    "description": "Switch the outbound proxy at runtime, with reachability probing and automatic direct fallback."
+  }
+}
