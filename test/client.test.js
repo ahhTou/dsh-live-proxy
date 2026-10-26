@@ -122,7 +122,7 @@ test('client module id and row key match the installed package and row', () => {
   assert.deepEqual(fake.injections, ['plugins.row.config']);
 
   for (const effect of fake.effects) effect.callback();
-  assert.deepEqual(fake.injections, ['plugins.row.config', 'settings.general.item']);
+  assert.deepEqual(fake.injections, ['plugins.row.config', 'settings.section']);
 
   const row = fake.registrations.find((entry) => entry.options.name === 'plugins.row.config');
   assert.ok(row, 'the Plugins row config must register');
@@ -130,11 +130,12 @@ test('client module id and row key match the installed package and row', () => {
   assert.equal(row.options.locale, 'dsh-live-proxy');
   assert.equal(typeof row.component, 'function');
 
-  const section = fake.registrations.find((entry) => entry.options.name === 'settings.general.item');
-  assert.ok(section, 'the Settings → General proxy row must register');
+  const section = fake.registrations.find((entry) => entry.options.name === 'settings.section');
+  assert.ok(section, 'the standalone Settings section must register');
   assert.equal(section.options.id, 'live-proxy');
-  assert.equal(section.options.order, 25);
+  assert.equal(section.options.order, 17);
   assert.equal(section.options.locale, 'dsh-live-proxy');
+  assert.equal(typeof section.options.label, 'function');
   assert.equal(typeof section.component, 'function');
   assert.equal(section.options.inject().scope, fake.scope);
 
