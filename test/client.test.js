@@ -122,7 +122,7 @@ test('client module id and row key match the installed package and row', () => {
   assert.deepEqual(fake.injections, ['plugins.row.config']);
 
   for (const effect of fake.effects) effect.callback();
-  assert.deepEqual(fake.injections, ['plugins.row.config', 'settings.section']);
+  assert.deepEqual(fake.injections, ['plugins.row.config', 'settings.section', 'settings.section.icon']);
 
   const row = fake.registrations.find((entry) => entry.options.name === 'plugins.row.config');
   assert.ok(row, 'the Plugins row config must register');
@@ -136,8 +136,17 @@ test('client module id and row key match the installed package and row', () => {
   assert.equal(section.options.order, 17);
   assert.equal(section.options.locale, 'dsh-live-proxy');
   assert.equal(typeof section.options.label, 'function');
+  assert.equal(section.options.label(), 'settingsLabel', 'the nav label is plain text the shell renders itself');
   assert.equal(typeof section.component, 'function');
   assert.equal(section.options.inject().scope, fake.scope);
+
+  // The shell falls back to its own gear for a section id it does not ship, so
+  // the custom glyph must occupy `settings.section.icon` under the same id.
+  const icon = fake.registrations.find((entry) => entry.options.name === 'settings.section.icon');
+  assert.ok(icon, 'the Settings nav icon must register');
+  assert.equal(icon.options.id, section.options.id, 'the icon id must equal the section id');
+  assert.equal(typeof icon.component, 'function');
+  assert.doesNotThrow(() => icon.component({ size: 16, active: true }));
 
   assert.ok(patch.includes('id: dsh-live-proxy'), 'the bundle patch must declare the row id used by the key');
 });

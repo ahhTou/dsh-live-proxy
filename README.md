@@ -36,9 +36,9 @@ dsh plugin --profile desktop add /Users/ahhtou/Dev/dsh-live-proxy
 |---|---|
 | ![设置导航里的代理](docs/settings-nav.png) | ![独立的代理配置页](docs/settings-proxy-page.png) |
 
-> 关于导航图标：Settings 的 `settings.section` 只给官方 section id 配图标，未知 id 会**强制回退成齿轮**（源码 `navIcon(id)`）。插件的 section `label` 里画自己的双向箭头，并用一条只命中「包含该 glyph 的导航格」的 CSS 隐藏 shell 的齿轮；如果未来 shell 改了内部类名，最多是两个图标同时出现，菜单本身不受影响。
+> 关于导航图标：Settings 的 `settings.section` 只给官方 section id 配图标，未知 id 会**强制回退成齿轮**（源码 `navIcon(id)`）。本插件占用同 id 的 `settings.section.icon` 槽位（`id: 'live-proxy'`），shell 会用插件的双向箭头**替换**齿轮，而不是并列渲染；section 的 `label` 保持纯文本「代理」。若某个 shell 版本没有这个图标槽位，导航只显示齿轮，功能不受影响。
 >
-> 这一版 DSH **不会**给第三方 bundle 自动生成配置界面：Settings 的 `settings.section` 和 Plugins 页的 `plugins.row.config` 都是扩展槽位，页面只提供表单数据（`state` + `mutate`），谁来渲染由插件自己的浏览器半侧决定。本插件的 `lib/client.js` 同时占用这两个槽位（行键 `@local/dsh-live-proxy#dsh-live-proxy`），所以仓库里同时有 Host 半侧 `index.js` 和 Client 半侧 `lib/client.js`。`package.json` 的 `dsh.client` 与 `exports["./client"]` 是加载 Client 半侧所必需的。
+> 这一版 DSH **不会**给第三方 bundle 自动生成配置界面：Settings 的 `settings.section`（页面）、`settings.section.icon`（导航图标）和 Plugins 页的 `plugins.row.config` 都是扩展槽位，页面只提供表单数据（`state` + `mutate`），谁来渲染由插件自己的浏览器半侧决定。本插件的 `lib/client.js` 占用这三个槽位（行键 `@local/dsh-live-proxy#dsh-live-proxy`），所以仓库里同时有 Host 半侧 `index.js` 和 Client 半侧 `lib/client.js`。`package.json` 的 `dsh.client` 与 `exports["./client"]` 是加载 Client 半侧所必需的。
 
 `cordis.patch.yml` 里的默认值是本机现状（Clash 系代理 `127.0.0.1:7897` + 原有直连例外）：
 
